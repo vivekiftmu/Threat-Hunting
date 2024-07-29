@@ -1,0 +1,39 @@
+Targeting Endpoint Security Post-BSOD
+
+Query 1: Detect Disabling of CrowdStrike or Endpoint Security Services
+
+let timeFrame = 1d;
+SecurityEvent
+| where TimeGenerated >= ago(timeFrame)
+| where EventID == 7040 // Windows Event ID for service state changes
+| where ServiceName in ("CrowdStrike", "AV", "EndpointSecurity") // Add other relevant security services
+| where ServiceStatus == "Stopped"
+| summarize ServiceStopCount = count() by Computer, ServiceName, bin(TimeGenerated, 1h)
+| where ServiceStopCount > 2 // Threshold for unusual activity
+
+
+Query 2: Detect Modifications to Security Software Configuration
+
+let timeFrame = 1d;
+SecurityEvent
+| where TimeGenerated >= ago(timeFrame)
+| where EventID == 4657 // Windows Event ID for registry value changes
+| where RegistryKey matches regex @"HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Services\\(CrowdStrike|AV|EndpointSecurity)\\.*"
+| summarize ModificationCount = count() by Computer, RegistryKey, bin(TimeGenerated, 1h)
+| where ModificationCount > 2 // Threshold for unusual activity
+
+
+Query 3: Detect Anomalous Network Traffic Post-BSOD
+
+let timeFrame = 1d;
+let bsodEvents = SecurityEvent
+| where TimeGenerated >= ago(timeFrame)
+| where EventID == 41 // Windows Event ID for unexpected shutdowns (BSOD)
+| project Computer, TimeGenerated;
+let unusualTrafficThreshold = 100MB;
+NetworkSecurityGroupEvent
+| where TimeGenerated >= ago(timeFrame)
+| join kind=inner (bsodEvents) on Computer
+| where Direction == "Outbound"
+| summarize TotalBytesSent = sum(SentBytes) by Computer, bin(TimeGenerated, 1h)
+| where TotalBytesSent > unusualTrafficThreshold
